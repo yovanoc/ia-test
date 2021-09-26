@@ -1,15 +1,14 @@
 import * as tf from "@tensorflow/tfjs";
-import { TIME_PORTION } from "../index.js";
 import { Model } from "./model.js";
 
 export class CnnModel extends Model {
-  build() {
+  override build(windowSize: number) {
     // Linear (sequential) stack of layers
     const model = tf.sequential();
 
     // Define input layer
     model.add(tf.layers.inputLayer({
-      inputShape: [TIME_PORTION, 1],
+      inputShape: [windowSize, 1],
     }));
 
     // Add the first convolutional layer

@@ -2,11 +2,22 @@ import "@tensorflow/tfjs-node";
 import { execute } from "./execute.js";
 import { CnnModel } from "./models/cnn.js";
 
-export const TIME_PORTION = 30;
+const windowSize = 168;
+const trainEpochs = 20;
 
 const main = async () => {
-  const model = new CnnModel("file://./models/cnn");
-  await execute(model, true);
+  const model = new CnnModel({
+    link: "file://./models/cnn",
+    windowSize,
+  });
+  await execute({
+    modelTmp: model,
+    windowSize,
+    trainEpochs,
+    shouldTrain: true,
+    symbol: "BTCUSDT",
+    timeFrame: "1h"
+  });
 };
 
 main();

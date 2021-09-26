@@ -8,12 +8,12 @@ export abstract class Model {
   model: tf.Sequential | tf.LayersModel;
 
 
-  constructor(link: string) {
+  constructor({ link, windowSize }: { link: string, windowSize: number }) {
     this.#link = link;
-    this.model = this.build();
+    this.model = this.build(windowSize);
   }
 
-  abstract build(): tf.Sequential;
+  abstract build(windowSize: number): tf.Sequential;
 
   public async train(data: {
     tensorTrainX: tf.Tensor<tf.Rank>;
@@ -28,8 +28,9 @@ export abstract class Model {
     // Train the model
     const result = await this.model.fit(data.tensorTrainX, data.tensorTrainY, {
       epochs,
+      batchSize: 32,
       verbose: 1,
-      shuffle: true
+      shuffle: true,
     })
 
     /*for (let i = result.epoch.length-1; i < result.epoch.length; ++i) {

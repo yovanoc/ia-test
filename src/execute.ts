@@ -1,51 +1,59 @@
 import * as tf from "@tensorflow/tfjs";
-import { saveChart } from "./chart.js";
+import { saveChart } from "./saveChart.js";
 import {
-  addDays,
-  generateNextDayPrediction,
+  addMsToDate,
+  timeFrameToMS,
+  generateNextPrediction,
   minMaxInverseScaler,
   minMaxScaler,
   processData,
 } from "./helpers.js";
-import { getData } from "./data.js";
+import { getData, Symbol, TimeFrame } from "./data.js";
 import { Model } from "./models/model.js";
-import { TIME_PORTION } from "./index.js";
 
-const epochs = 100;
-
-export const execute = async (modelTmp: Model, shouldTrain = false) => {
-  const symbol = "BTCUSDT";
-  const allData = await getData(symbol);
+export const execute = async ({
+  modelTmp,
+  symbol,
+  timeFrame,
+  windowSize,
+  trainEpochs,
+  shouldTrain = false
+}: {
+  modelTmp: Model;
+  windowSize: number;
+  trainEpochs: number;
+  symbol: Symbol;
+  timeFrame: TimeFrame;
+  shouldTrain: boolean;
+}) => {
+  const data = await getData(symbol, timeFrame);
   const splitDate = new Date("2021-01-01T22:00:00.000Z");
-  const trainData = allData.filter((d) => new Date(d.date) < splitDate);
-  const visData = allData.filter((d) => new Date(d.date) >= splitDate);
-  // Get the datetime labels use in graph
-  const labels = visData.map((val) => new Date(val.date));
   // Process the data and create the train sets
-  const trainResult = processData(trainData, TIME_PORTION);
-  const visResult = processData(visData, TIME_PORTION);
-  // Crate the set for stock price prediction for the next day
-  const nextDayPrediction = generateNextDayPrediction(
-    visResult.originalData,
-    visResult.timePortion
+  const results = processData(data, windowSize, splitDate);
+  // Get the datetime labels use in graph
+  const labels = data.splice(-results.visY.length + 1).map((val) => val.closeTime);
+  // Crate the set for stock price prediction for the next entry
+  const nextPrediction = generateNextPrediction(
+    results.originalData,
+    results.timePortion
   );
   // Get the last date from the data set
-  const predictDate = addDays(labels[labels.length - 1], 1);
-  // Transform the data to tensor data
-  // Reshape the data in neural network input format [number_of_samples, timePortion, 1];
-  const trainTensorData = {
-    tensorTrainX: tf
-      .tensor1d(trainResult.trainX)
-      .reshape([trainResult.size, trainResult.timePortion, 1]),
-    tensorTrainY: tf.tensor1d(trainResult.trainY),
-  };
+  const predictDate = addMsToDate(labels[labels.length - 1], timeFrameToMS(timeFrame));
   // Remember the min and max in order to revert (min-max scaler) the scaled data later
-  const max = visResult.max;
-  const min = visResult.min;
+  const max = results.max;
+  const min = results.min;
   // Train the model using the tensor data
   // Repeat multiple epochs so the error rate is smaller (better fit for the data)
   if (shouldTrain) {
-    await modelTmp.train(trainTensorData, epochs);
+    // Transform the data to tensor data
+    // Reshape the data in neural network input format [number_of_samples, timePortion, 1];
+    const trainTensorData = {
+      tensorTrainX: tf
+        .tensor1d(results.trainX)
+        .reshape([results.trainSize, results.timePortion, 1]),
+      tensorTrainY: tf.tensor1d(results.trainY),
+    };
+    await modelTmp.train(trainTensorData, trainEpochs);
     await modelTmp.save();
   } else {
     await modelTmp.load();
@@ -55,20 +63,20 @@ export const execute = async (modelTmp: Model, shouldTrain = false) => {
   // We gonna show the both (original, predicted) sets on the graph
   // so we can see how well our model fits the data
   const visTensorData = {
-    tensorTrainX: tf
-      .tensor1d(visResult.trainX)
-      .reshape([visResult.size, visResult.timePortion, 1]),
-    tensorTrainY: tf.tensor1d(visResult.trainY),
+    tensorVisX: tf
+      .tensor1d(results.visX)
+      .reshape([results.visSize, results.timePortion, 1]),
+    tensorVisY: tf.tensor1d(results.visY),
   };
   const predictedX = model.predict(
-    visTensorData.tensorTrainX
+    visTensorData.tensorVisX
   ) as tf.Tensor<tf.Rank>;
   // Scale the next day features
-  const nextDayPredictionScaled = minMaxScaler(nextDayPrediction, min, max);
+  const nextDayPredictionScaled = minMaxScaler(nextPrediction, min, max);
   // Transform to tensor data
   const tensorNextDayPrediction = tf
     .tensor1d(nextDayPredictionScaled.data)
-    .reshape([1, visResult.timePortion, 1]);
+    .reshape([1, results.timePortion, 1]);
   // Predict the next day stock price
   const predictedValue = model.predict(
     tensorNextDayPrediction
@@ -80,12 +88,12 @@ export const execute = async (modelTmp: Model, shouldTrain = false) => {
   // Print the predicted stock price value for the next day
   console.log(
     "Predicted Stock Price of " +
-      symbol +
-      " for date " +
-      predictDate.toLocaleString() +
-      " is: " +
-      inversePredictedValue.data[0].toFixed(3) +
-      "$"
+    symbol +
+    " for date " +
+    predictDate.toLocaleString() +
+    " is: " +
+    inversePredictedValue.data[0].toFixed(3) +
+    "$"
   );
   // Get the next day predicted value
   const pred = await predictedX.data();
@@ -98,7 +106,7 @@ export const execute = async (modelTmp: Model, shouldTrain = false) => {
     inversePredictedValue.data[0];
   // Revert the scaled labels from the trainY (original),
   // so we can compare them with the predicted one
-  const trainYInverse = minMaxInverseScaler(visResult.trainY, min, max);
+  const trainYInverse = minMaxInverseScaler(results.visY, min, max);
   // Plot the original (trainY) and predicted values for the same features set (trainX)
   await saveChart(
     symbol,
